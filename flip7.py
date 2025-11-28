@@ -1,5 +1,13 @@
 import random
 from enum import Enum, auto
+from typing import Iterable, Optional
+
+from strategies import (
+    AggressiveStrategy,
+    ConservativeStrategy,
+    Flip7ChaserStrategy,
+    Strategy,
+)
 
 class CardType(Enum):
     NUMBER = auto()
@@ -66,7 +74,7 @@ class Deck:
         return self.draw_pile.pop()
 
 class Player:
-    def __init__(self, name):
+    def __init__(self, name: str, strategy: Optional[Strategy] = None):
         self.name = name
         self.total_game_score = 0
         self.hand = [] # Current round cards
@@ -75,6 +83,7 @@ class Player:
         self.frozen = False
         self.second_chance = False
         self.forced_flips = 0 # For 'Flip Three' action
+        self.strategy = strategy or Flip7ChaserStrategy()
 
     def reset_round(self):
         self.hand = []
@@ -113,29 +122,21 @@ class Player:
         unique_nums = {c.value for c in self.hand if c.card_type == CardType.NUMBER}
         return len(unique_nums) >= 7
 
-    def decide_action(self, active_opponents):
-        # Simple AI Strategy
+    def decide_action(self, active_opponents: Iterable["Player"]):
         # Always hit if forced
         if self.forced_flips > 0:
             return "hit"
-            
-        current_points = self.calculate_round_score()
-        unique_nums = len({c.value for c in self.hand if c.card_type == CardType.NUMBER})
-        
-        # Strategy: Risk logic
-        # If close to Flip 7 (5 or 6 cards), try to hit
-        # If score is high (>40), stay
-        #TODO Implement alternative strategies
-        if unique_nums >= 5:
-            return "hit"
-        if current_points > 40:
-            return "stay"
-        
-        return "hit"
+
+        return self.strategy.choose_action(self, active_opponents)
 
 class Game:
-    def __init__(self, player_names):
-        self.players = [Player(name) for name in player_names]
+    def __init__(self, player_names, strategies=None):
+        self.players = []
+        for idx, name in enumerate(player_names):
+            strategy = None
+            if strategies and idx < len(strategies):
+                strategy = strategies[idx]
+            self.players.append(Player(name, strategy=strategy))
         self.deck = Deck()
         self.dealer_index = 0
         self.round_num = 1
@@ -277,7 +278,8 @@ class Game:
                     player.forced_flips -= 1
                     print(f"{player.name} is forced to hit! ({player.forced_flips} remaining)")
                 else:
-                    action = player.decide_action(active_players)
+                    opponents = [p for p in active_players if p != player]
+                    action = player.decide_action(opponents)
 
                 if action == "hit":
                     print(f"{player.name} HITS.")
@@ -326,5 +328,11 @@ class Game:
 
 # --- Run Simulation ---
 if __name__ == "__main__":
-    game = Game(["Alice", "Bob", "Charlie", "Diana"])
+    strategies = [
+        Flip7ChaserStrategy(),
+        ConservativeStrategy(stay_threshold=35),
+        AggressiveStrategy(),
+        Flip7ChaserStrategy(safe_score=45),
+    ]
+    game = Game(["Alice", "Bob", "Charlie", "Diana"], strategies=strategies)
     game.play_game()
