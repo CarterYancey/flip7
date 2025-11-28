@@ -186,11 +186,13 @@ class Game:
             # [cite: 93] Target banks points and is out
             target.frozen = True
             target.active = False
+            target.hand.append(card)
             self._log(f"  > {target.name} is Frozen! They bank their current score and exit the round.")
 
         elif card.name == "Flip Three":
             # [cite: 95] Target must accept next 3 cards
-            target.forced_flips += 3
+            target.forced_flips += 3 #TODO This should be done immediately; all three cards have to be flipped now
+            target.hand.append(card)
             self._log(f"  > {target.name} must Flip Three cards!")
 
         elif card.name == "Second Chance":
@@ -329,7 +331,7 @@ class Game:
                     action = player.decide_action(opponents)
 
                 if action == "hit":
-                    self._log(f"{player.name} HITS.")
+                    self._log(f"{player.name} {player.hand} HITS.")
                     result = self.deal_card_to_player(player, during_forced=forced_draw)
 
                     if forced_draw and player.forced_flips == 0 and not player.busted and result != "FLIP7":
@@ -343,7 +345,7 @@ class Game:
                         round_over = True
                         break
                 else:
-                    self._log(f"{player.name} STAYS.")
+                    self._log(f"{player.name} {player.hand} STAYS.")
                     player.active = False # Safe for round
 
         # 3. End of Round Scoring
@@ -446,6 +448,10 @@ def _parse_player_specs(args_players: Optional[List[str]]) -> List[Tuple[str, St
             ("Bob", ConservativeStrategy(stay_threshold=35)),
             ("Charlie", AggressiveStrategy()),
             ("Diana", Flip7ChaserStrategy(safe_score=45)),
+            ("Eugene", ConservativeStrategy(stay_threshold=30)),
+            ("Frank", ConservativeStrategy(stay_threshold=27)),
+            ("Georgina", AggressiveStrategy()),
+            ("Pat", PerfectStrategy()),
         ]
 
     parsed = []
