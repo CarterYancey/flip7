@@ -187,6 +187,7 @@ class Game:
             # [cite: 93] Target banks points and is out
             target.frozen = True
             target.active = False
+            target.hand.append(card)
             self._log(f"  > {target.name} is Frozen! They bank their current score and exit the round.")
 
         elif card.name == "Flip Three":
@@ -492,6 +493,10 @@ def _parse_player_specs(args_players: Optional[List[str]]) -> List[Tuple[str, St
             ("Bob", ConservativeStrategy(stay_threshold=35)),
             ("Charlie", AggressiveStrategy()),
             ("Diana", Flip7ChaserStrategy(safe_score=45)),
+            ("Eugene", ConservativeStrategy(stay_threshold=30)),
+            ("Frank", ConservativeStrategy(stay_threshold=27)),
+            ("Georgina", AggressiveStrategy()),
+            ("Pat", PerfectStrategy()),
         ]
 
     parsed = []
