@@ -336,30 +336,15 @@ class Game:
         round_over = False
         winner_flip7 = None
 
-        # 1. Initial Deal (1 card each) [cite: 60]
-        self._log("Dealing initial cards...")
-        for i in range(len(self.players)):
-            # Dealing order starting from dealer
-            p_idx = (self.dealer_index + i) % len(self.players)
-            player = self.players[p_idx]
-
-            card = self.deck.draw()
-            self._log(f"{player.name} starts with {card}")
-
-            # If Action comes up in dealing, resolve immediately [cite: 61]
-            if card.card_type == CardType.ACTION:
-                result = self.resolve_action_card(card, player, self.players)
-                if result == "FLIP7":
-                    winner_flip7 = self.pending_flip7_winner
-                    round_over = True
-                    break
-            else:
-                player.hand.append(card)
-
-        # 2. Turns
+        # Turns (starting from dealer)
         if not round_over:
+            turn_order = [
+                self.players[(self.dealer_index + i) % len(self.players)]
+                for i in range(len(self.players))
+            ]
+
             while not round_over:
-                active_players = self.get_active_players()
+                active_players = [p for p in turn_order if p.active]
                 if not active_players:
                     break # Everyone stayed or busted [cite: 127]
 
