@@ -21,6 +21,7 @@ The CLI supports single games (verbose) and multi-game simulations (quiet). Key 
 - `--winning-score`: Target game score. Defaults to 200.
 
 Supported strategies:
+- `human`: Prompt for hit/stay decisions and action targets.
 - `aggressive`: Always hit.
 - `conservative[=stay]`: Stay once the round score reaches `stay` (default 40).
 - `flip7[=safe]`: Chase Flip 7; stay if score reaches `safe` (default 50).
@@ -29,6 +30,11 @@ Supported strategies:
 ### Play a single game
 ```bash
 python flip7.py --games 1 --players "Alice:flip7" "Bob:conservative=35" "Charlie:aggressive"
+```
+
+To play interactively alongside the AI, mark yourself as `human`:
+```bash
+python flip7.py --games 1 --players "You:human" "BotA:flip7" "BotB:perfect"
 ```
 
 ### Run simulations with a summary

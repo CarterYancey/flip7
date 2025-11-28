@@ -23,6 +23,30 @@ class AggressiveStrategy:
         return "hit"
 
 
+class HumanStrategy:
+    """Interactive strategy that prompts a human for each decision."""
+
+    def choose_action(self, player, active_opponents):
+        if player.forced_flips > 0:
+            return "hit"
+
+        current_score = player.calculate_round_score()
+        prompt = (
+            f"\n{player.name}, it's your turn.\n"
+            f"Current hand: {player.hand}\n"
+            f"Current round score: {current_score}\n"
+            "Choose action ([h]it/[s]tay): "
+        )
+
+        while True:
+            choice = input(prompt).strip().lower()
+            if choice in {"h", "hit"}:
+                return "hit"
+            if choice in {"s", "stay"}:
+                return "stay"
+            print("Please enter 'h' to hit or 's' to stay.")
+
+
 class ConservativeStrategy:
     """Stay once the player reaches a configurable score threshold."""
 

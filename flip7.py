@@ -7,6 +7,7 @@ from strategies import (
     AggressiveStrategy,
     ConservativeStrategy,
     Flip7ChaserStrategy,
+    HumanStrategy,
     PerfectStrategy,
     Strategy,
 )
@@ -87,7 +88,7 @@ class Player:
         self.frozen = False
         self.second_chance = False
         self.forced_flips = 0 # For 'Flip Three' action
-        self.pending_actions: List[Card] = []
+        self.pending_actions: List[Tuple[Card, Optional["Player"]]] = []
         self.strategy = strategy or Flip7ChaserStrategy()
         self.game = None
 
@@ -157,6 +158,37 @@ class Game:
         if self.verbose:
             print(message)
 
+    def _select_action_target(self, drawer: Player, targets: List[Player], card: Card):
+        available_targets = [t for t in targets if t.active]
+        if not available_targets:
+            return drawer
+
+        if isinstance(drawer.strategy, HumanStrategy):
+            print(f"\nYou drew {card.name}. Choose a target:")
+            for idx, target in enumerate(available_targets, start=1):
+                status = []
+                if target == drawer:
+                    status.append("(you)")
+                if target.frozen:
+                    status.append("frozen")
+                if target.busted:
+                    status.append("busted")
+                status_str = f" {' '.join(status)}" if status else ""
+                print(f"  {idx}. {target.name}{status_str}")
+
+            while True:
+                choice = input("Target number (default 1): ").strip()
+                if not choice:
+                    return available_targets[0]
+                if choice.isdigit() and 1 <= int(choice) <= len(available_targets):
+                    return available_targets[int(choice) - 1]
+                print("Please enter a valid target number.")
+
+        non_self_targets = [t for t in available_targets if t != drawer]
+        if non_self_targets:
+            return random.choice(non_self_targets)
+        return available_targets[0]
+
     def play_game(self):
         self._log(f"Starting Flip 7! Goal: {self.winning_score} points.\n")
 
@@ -175,14 +207,18 @@ class Game:
     def get_active_players(self):
         return [p for p in self.players if p.active]
 
-    def resolve_action_card(self, card, drawer, players, *, add_to_drawer_hand: bool = True):
+    def resolve_action_card(
+        self,
+        card,
+        drawer,
+        players,
+        *,
+        add_to_drawer_hand: bool = True,
+        chosen_target: Optional["Player"] = None,
+    ):
         # [cite: 86] Action cards target active players
-        #TODO Improve target logic. Sometimes a player may want to target their self.
-        targets = [p for p in players if p.active and p != drawer]
-        if not targets:
-            target = drawer # Targets self if only one active [cite: 87]
-        else:
-            target = random.choice(targets)
+        targets = [p for p in players if p.active]
+        target = chosen_target or self._select_action_target(drawer, targets, card)
 
         if card.name == "Freeze":
             # [cite: 93] Target banks points and is out
@@ -234,7 +270,7 @@ class Game:
             if result == "FLIP7":
                 return "FLIP7"
             if target.busted:
-                self.deck.discard_pile.extend(target.pending_actions)
+                self.deck.discard_pile.extend([c for c, _ in target.pending_actions])
                 target.pending_actions = []
                 return "BUST"
 
@@ -253,13 +289,24 @@ class Game:
         if card.card_type == CardType.ACTION:
             # Action cards are resolved immediately (unless dealt during setup, handled separately)
             # In regular play, they are placed above rows[cite: 88], but effect triggers
+            target_choice = None
+            if card.name in {"Flip Three", "Freeze"}:
+                target_choice = self._select_action_target(
+                    player, [p for p in self.players if p.active], card
+                )
+
             if during_forced and card.name in {"Flip Three", "Freeze"}:
-                #player.hand.append(card)
-                player.pending_actions.append(card)
+                player.pending_actions.append((card, target_choice))
                 self._log(f"    ! {card.name} will resolve after the Flip Three sequence.")
                 return "OK"
             else:
-                result = self.resolve_action_card(card, player, self.players, add_to_drawer_hand=False)
+                result = self.resolve_action_card(
+                    card,
+                    player,
+                    self.players,
+                    add_to_drawer_hand=False,
+                    chosen_target=target_choice,
+                )
                 if result == "FLIP7":
                     self.pending_flip7_winner = self.pending_flip7_winner or player
                     return "FLIP7"
@@ -291,7 +338,7 @@ class Game:
                     self._log(f"    ! BUST ! {player.name} drew a duplicate {card.value}.")
                     player.busted = True
                     player.active = False
-                    self.deck.discard_pile.extend(player.pending_actions)
+                    self.deck.discard_pile.extend([c for c, _ in player.pending_actions])
                     player.pending_actions = []
                     self.deck.discard_pile.append(card)
             else:
@@ -308,18 +355,24 @@ class Game:
             return
 
         if player.busted:
-            self.deck.discard_pile.extend(target.pending_actions)
+            self.deck.discard_pile.extend([c for c, _ in player.pending_actions])
             player.pending_actions = []
             return
 
         pending = player.pending_actions[:]
         player.pending_actions = []
 
-        for card in pending:
+        for card, target in pending:
             self._log(f"    > Resolving pending {card.name} from Flip Three.")
-            result = self.resolve_action_card(card, player, self.players, add_to_drawer_hand=False)
+            result = self.resolve_action_card(
+                card,
+                player,
+                self.players,
+                add_to_drawer_hand=False,
+                chosen_target=target,
+            )
             if result == "FLIP7":
-                self.deck.discard_pile.extend(pending)
+                self.deck.discard_pile.extend([c for c, _ in pending])
                 return "FLIP7"
 
         return "OK"
@@ -374,7 +427,7 @@ class Game:
                             winner_flip7 = self.pending_flip7_winner or player
                             round_over = True
                             for p in self.players:
-                                self.deck.discard_pile.extend(p.pending_actions)
+                                self.deck.discard_pile.extend([c for c, _ in p.pending_actions])
                             break
                     else:
                         self._log(f"{player.name} {player.hand} STAYS.")
@@ -470,6 +523,8 @@ def _parse_strategy(spec: str) -> Strategy:
 
     if base in {"aggressive", "agg"}:
         return AggressiveStrategy()
+    if base in {"human", "player"}:
+        return HumanStrategy()
     if base in {"conservative", "cons"}:
         stay = int(param) if param else 40
         return ConservativeStrategy(stay_threshold=stay)
