@@ -86,6 +86,7 @@ class Player:
         self.frozen = False
         self.second_chance = False
         self.forced_flips = 0 # For 'Flip Three' action
+        self.pending_actions: List[Card] = []
         self.strategy = strategy or Flip7ChaserStrategy()
         self.game = None
 
@@ -96,6 +97,7 @@ class Player:
         self.frozen = False
         self.second_chance = False
         self.forced_flips = 0
+        self.pending_actions = []
 
     def calculate_round_score(self):
         # [cite: 147-170]
@@ -148,6 +150,7 @@ class Game:
         self.dealer_index = 0
         self.round_num = 1
         self.winning_score = 200 # [cite: 5]
+        self.pending_flip7_winner: Optional[Player] = None
 
     def _log(self, message: str):
         if self.verbose:
@@ -171,7 +174,7 @@ class Game:
     def get_active_players(self):
         return [p for p in self.players if p.active]
 
-    def resolve_action_card(self, card, drawer, players):
+    def resolve_action_card(self, card, drawer, players, *, add_to_drawer_hand: bool = True):
         # [cite: 86] Action cards target active players
         #TODO Improve target logic. Sometimes a player may want to target their self.
         targets = [p for p in players if p.active and p != drawer]
@@ -179,8 +182,6 @@ class Game:
             target = drawer # Targets self if only one active [cite: 87]
         else:
             target = random.choice(targets)
-
-        #print(f"  > Action! {drawer.name} plays {card.name} on {target.name}")
 
         if card.name == "Freeze":
             # [cite: 93] Target banks points and is out
@@ -190,30 +191,63 @@ class Game:
 
         elif card.name == "Flip Three":
             # [cite: 95] Target must accept next 3 cards
-            target.forced_flips += 3
-            self._log(f"  > {target.name} must Flip Three cards!")
+            self._log(f"  > {target.name} must Flip Three cards immediately!")
+            result = self.perform_flip_three(target)
+            if result == "FLIP7":
+                return "FLIP7"
 
         elif card.name == "Second Chance":
             # [cite: 104] Keep this card. Protects against bust.
             # Max 1 per player [cite: 105]
             if not drawer.second_chance:
                 drawer.second_chance = True
-                drawer.hand.append(card) #TODO second chance card is getting added to hand list twice
+                if add_to_drawer_hand:
+                    drawer.hand.append(card)
                 self._log(f"  > {drawer.name} gains a Second Chance!")
             else:
-                # Pass to another player if already have one [cite: 106]
-                if targets: #TODO: This is just giving it to a specific player without checking to see if that player already has one (they might).
-                    targets[0].second_chance = True
-                    targets[0].hand.append(card)
+                recipient = next((p for p in players if p != drawer and not p.second_chance), None)
+                if recipient:
+                    recipient.second_chance = True
+                    recipient.hand.append(card)
                     self._log(
-                        f"  > {drawer.name} already has one. Passed Second Chance to {targets[0].name}."
+                        f"  > {drawer.name} already has one. Passed Second Chance to {recipient.name}."
                     )
                 else:
-                    self._log(
-                        "  > Everyone has Second Chance. Card discarded."
-                    ) #TODO `else` here does not mean everyone has a second chance...
+                    self.deck.discard_pile.append(card)
+                    self._log("  > No one can take Second Chance. Card discarded.")
+                return
 
-    def deal_card_to_player(self, player):
+        if add_to_drawer_hand:
+            drawer.hand.append(card)
+
+        return "OK"
+
+    def perform_flip_three(self, target: Player):
+        flips_remaining = 3
+        while flips_remaining > 0:
+            if target.busted:
+                target.pending_actions = []
+                return "BUST"
+
+            self._log(f"    {target.name} flips a card for Flip Three... ({flips_remaining} to go)")
+            result = self.deal_card_to_player(target, during_forced=True)
+            flips_remaining -= 1
+
+            if result == "FLIP7":
+                return "FLIP7"
+            if target.busted:
+                target.pending_actions = []
+                return "BUST"
+
+        if target.pending_actions:
+            self._log(f"{target.name} finished Flip Three draws. Resolving pending actions...")
+            result = self.resolve_pending_actions(target)
+            if result == "FLIP7":
+                return "FLIP7"
+
+        return "OK"
+
+    def deal_card_to_player(self, player, *, during_forced: bool = False):
         card = self.deck.draw()
         if not card:
             return # Deck empty edge case
@@ -223,9 +257,17 @@ class Game:
         if card.card_type == CardType.ACTION:
             # Action cards are resolved immediately (unless dealt during setup, handled separately)
             # In regular play, they are placed above rows[cite: 88], but effect triggers
-            self.resolve_action_card(card, player, self.players)
-            # Actions don't count for Flip 7 or Busts (except forcing logic)
-            player.hand.append(card) #TODO action cards can get appended to player twice here
+            if during_forced and card.name in {"Flip Three", "Freeze"}:
+                player.hand.append(card)
+                player.pending_actions.append(card)
+                self._log(f"    ! {card.name} will resolve after the Flip Three sequence.")
+                return "OK"
+            else:
+                result = self.resolve_action_card(card, player, self.players, add_to_drawer_hand=True)
+                if result == "FLIP7":
+                    self.pending_flip7_winner = self.pending_flip7_winner or player
+                    return "FLIP7"
+                return result
 
         elif card.card_type == CardType.MODIFIER:
             # [cite: 112] Modifiers don't cause bust
@@ -234,7 +276,7 @@ class Game:
         elif card.card_type == CardType.NUMBER:
             # Check for Bust [cite: 10]
             existing_nums = [c.value for c in player.hand if c.card_type == CardType.NUMBER]
-            
+
             if card.value in existing_nums:
                 if player.second_chance:
                     # [cite: 104] Discard duplicate and Second Chance
@@ -242,25 +284,54 @@ class Game:
                         f"    ! SAVED BY SECOND CHANCE ! Discarding {card} and Second Chance token."
                     )
                     player.second_chance = False
+                    for existing in list(player.hand):
+                        if existing.name == "Second Chance":
+                            player.hand.remove(existing)
+                            self.deck.discard_pile.append(existing)
+                            break
                     # Card is effectively discarded, not added to hand
-                    #TODO: Is the second_chance card placed into the discard pile now? It should be.
                 else:
                     self._log(f"    ! BUST ! {player.name} drew a duplicate {card.value}.")
                     player.busted = True
                     player.active = False
+                    player.pending_actions = []
             else:
                 player.hand.append(card)
                 # Check Flip 7 Victory [cite: 9]
                 if player.has_flip_seven():
+                    self.pending_flip7_winner = player
                     return "FLIP7"
+
+        return "OK"
+
+    def resolve_pending_actions(self, player):
+        if not player.pending_actions:
+            return
+
+        if player.busted:
+            player.pending_actions = []
+            return
+
+        pending = player.pending_actions[:]
+        player.pending_actions = []
+
+        for card in pending:
+            self._log(f"    > Resolving pending {card.name} from Flip Three.")
+            result = self.resolve_action_card(card, player, self.players, add_to_drawer_hand=False)
+            if result == "FLIP7":
+                return "FLIP7"
 
         return "OK"
 
     def play_round(self):
         self._log(f"\n--- Round {self.round_num} ---")
+        self.pending_flip7_winner = None
         for p in self.players:
             p.reset_round()
-        
+
+        round_over = False
+        winner_flip7 = None
+
         # 1. Initial Deal (1 card each) [cite: 60]
         self._log("Dealing initial cards...")
         for i in range(len(self.players)):
@@ -270,49 +341,56 @@ class Game:
 
             card = self.deck.draw()
             self._log(f"{player.name} starts with {card}")
-            
+
             # If Action comes up in dealing, resolve immediately [cite: 61]
             if card.card_type == CardType.ACTION:
-                self.resolve_action_card(card, player, self.players)
-                player.hand.append(card)
+                result = self.resolve_action_card(card, player, self.players)
+                if result == "FLIP7":
+                    winner_flip7 = self.pending_flip7_winner
+                    round_over = True
+                    break
             else:
                 player.hand.append(card)
 
         # 2. Turns
-        round_over = False
-        winner_flip7 = None
+        if not round_over:
+            while not round_over:
+                active_players = self.get_active_players()
+                if not active_players:
+                    break # Everyone stayed or busted [cite: 127]
 
-        while not round_over:
-            active_players = self.get_active_players()
-            if not active_players:
-                break # Everyone stayed or busted [cite: 127]
+                for player in active_players:
+                    if not player.active: continue # Might have been frozen by previous player this loop
 
-            for player in active_players:
-                if not player.active: continue # Might have been frozen by previous player this loop
+                    # Check forced flips (Flip Three)
+                    action = "stay"
+                    forced_draw = False
+                    if player.forced_flips > 0:
+                        action = "hit"
+                        player.forced_flips -= 1
+                        forced_draw = True
+                        self._log(f"{player.name} is forced to hit! ({player.forced_flips} remaining)")
+                    else:
+                        opponents = [p for p in active_players if p != player]
+                        action = player.decide_action(opponents)
 
-                # Check forced flips (Flip Three)
-                action = "stay"
-                if player.forced_flips > 0:
-                    action = "hit"
-                    player.forced_flips -= 1
-                    self._log(f"{player.name} is forced to hit! ({player.forced_flips} remaining)")
-                else:
-                    opponents = [p for p in active_players if p != player]
-                    action = player.decide_action(opponents)
+                    if action == "hit":
+                        self._log(f"{player.name} HITS.")
+                        result = self.deal_card_to_player(player, during_forced=forced_draw)
 
-                if action == "hit":
-                    self._log(f"{player.name} HITS.")
-                    result = self.deal_card_to_player(player)
+                        if forced_draw and player.forced_flips == 0 and not player.busted and result != "FLIP7":
+                            self._log(f"{player.name} finished Flip Three draws. Resolving pending actions...")
+                            self.resolve_pending_actions(player)
 
-                    if result == "FLIP7":
-                        # [cite: 135] Round ends immediately
-                        self._log(f"!!! {player.name} ACHIEVED FLIP 7 !!!")
-                        winner_flip7 = player
-                        round_over = True
-                        break
-                else:
-                    self._log(f"{player.name} STAYS.")
-                    player.active = False # Safe for round
+                        if result == "FLIP7":
+                            # [cite: 135] Round ends immediately
+                            self._log(f"!!! {player.name} ACHIEVED FLIP 7 !!!")
+                            winner_flip7 = self.pending_flip7_winner or player
+                            round_over = True
+                            break
+                    else:
+                        self._log(f"{player.name} STAYS.")
+                        player.active = False # Safe for round
 
         # 3. End of Round Scoring
         self._log("\n--- Round Scores ---")
