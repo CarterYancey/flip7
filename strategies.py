@@ -65,3 +65,69 @@ class Flip7ChaserStrategy:
             return "stay"
 
         return "hit"
+
+
+class PerfectStrategy:
+    """Card-counting strategy that maximizes expected value each turn."""
+
+    @staticmethod
+    def _simulate_score_after_hit(player, card):
+        # Local import to avoid circular dependency at module load time
+        from flip7 import CardType, Player
+
+        temp_player = Player(player.name)
+        temp_player.hand = list(player.hand)
+        temp_player.busted = False
+        temp_player.second_chance = player.second_chance
+
+        if getattr(card.card_type, "name", None) == "NUMBER":
+            existing_nums = [
+                c.value for c in temp_player.hand if getattr(c.card_type, "name", None) == "NUMBER"
+            ]
+            if card.value in existing_nums:
+                if temp_player.second_chance:
+                    temp_player.second_chance = False
+                else:
+                    temp_player.busted = True
+                    return 0
+            else:
+                temp_player.hand.append(card)
+        elif getattr(card.card_type, "name", None) == "ACTION":
+            temp_player.hand.append(card)
+            if card.name == "Second Chance" and not temp_player.second_chance:
+                temp_player.second_chance = True
+        else:
+            temp_player.hand.append(card)
+
+        return temp_player.calculate_round_score()
+
+    def choose_action(self, player, active_opponents):
+        game = getattr(player, "game", None)
+        if not game or not game.deck.draw_pile:
+            return "stay"
+
+        deck = game.deck
+        remaining_cards = deck.draw_pile
+        total_cards = len(remaining_cards)
+
+        numbers_in_hand = {
+            c.value for c in player.hand if getattr(c.card_type, "name", None) == "NUMBER"
+        }
+
+        if player.second_chance:
+            bust_probability = 0
+        else:
+            bust_cards = [
+                c
+                for c in remaining_cards
+                if getattr(c.card_type, "name", None) == "NUMBER" and c.value in numbers_in_hand
+            ]
+            bust_probability = len(bust_cards) / total_cards
+
+        current_score = player.calculate_round_score()
+        expected_score = sum(self._simulate_score_after_hit(player, card) for card in remaining_cards) / total_cards
+
+        if expected_score > current_score and bust_probability < 1:
+            return "hit"
+
+        return "stay"
