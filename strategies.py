@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Protocol, TYPE_CHECKING
+from enum import Enum, auto
 
 if TYPE_CHECKING:  # pragma: no cover
     from typing import Iterable
@@ -126,6 +127,8 @@ class PerfectStrategy:
 
         current_score = player.calculate_round_score()
         expected_score = sum(self._simulate_score_after_hit(player, card) for card in remaining_cards) / total_cards
+        #print("current score: ", current_score)
+        #print("expected score: ", expected_score)
 
         if expected_score > current_score and bust_probability < 1:
             return "hit"

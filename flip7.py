@@ -102,7 +102,7 @@ class Player:
         if self.busted:
             return 0
         
-        number_sum = sum(c.value for c in self.hand if c.card_type == CardType.NUMBER)
+        number_sum = sum(c.value for c in self.hand if getattr(c.card_type, "name", None) == "NUMBER")
         
         # Apply Multiplier First [cite: 122]
         has_multiplier = any(c.name == "x2 Multiplier" for c in self.hand)
@@ -110,12 +110,12 @@ class Player:
             number_sum *= 2
             
         # Add Bonus Points [cite: 161]
-        modifier_sum = sum(c.value for c in self.hand if c.card_type == CardType.MODIFIER and c.name != "x2 Multiplier")
+        modifier_sum = sum(c.value for c in self.hand if getattr(c.card_type, "name", None) == "MODIFIER" and c.name != "x2 Multiplier")
         
         total = number_sum + modifier_sum
         
         # Check Flip 7 Bonus [cite: 170]
-        unique_nums = {c.value for c in self.hand if c.card_type == CardType.NUMBER}
+        unique_nums = {c.value for c in self.hand if getattr(c.card_type, "name", None) == "NUMBER"}
         if len(unique_nums) >= 7:
             total += 15
             
