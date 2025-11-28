@@ -194,7 +194,7 @@ class Game:
             # Max 1 per player [cite: 105]
             if not drawer.second_chance:
                 drawer.second_chance = True
-                drawer.hand.append(card)
+                drawer.hand.append(card) #TODO second chance card is getting added to hand list twice
                 self._log(f"  > {drawer.name} gains a Second Chance!")
             else:
                 # Pass to another player if already have one [cite: 106]
@@ -221,7 +221,7 @@ class Game:
             # In regular play, they are placed above rows[cite: 88], but effect triggers
             self.resolve_action_card(card, player, self.players)
             # Actions don't count for Flip 7 or Busts (except forcing logic)
-            player.hand.append(card)
+            player.hand.append(card) #TODO action cards can get appended to player twice here
 
         elif card.card_type == CardType.MODIFIER:
             # [cite: 112] Modifiers don't cause bust
