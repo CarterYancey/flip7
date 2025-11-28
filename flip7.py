@@ -49,7 +49,8 @@ class Deck:
         # Estimated remaining counts to reach ~94 cards
         cards.append(Card("+2 Points", CardType.MODIFIER, 2, 1))
         cards.append(Card("+4 Points", CardType.MODIFIER, 4, 1))
-        cards.append(Card("+8 Points", CardType.MODIFIER, 8, 1)) # Inferred from image
+        cards.append(Card("+6 Points", CardType.MODIFIER, 6, 1)) 
+        cards.append(Card("+8 Points", CardType.MODIFIER, 8, 1)) 
         cards.append(Card("+10 Points", CardType.MODIFIER, 10, 1))
         cards.append(Card("x2 Multiplier", CardType.MODIFIER, 0, 1))
 
@@ -59,10 +60,12 @@ class Deck:
                 final_deck.append(Card(c.name, c.card_type, c.value))
         
         self.draw_pile = final_deck
+        assert len(self.draw_pile) == 94, f"Deck should have 94 cards, found {len(self.draw_pile)}."
         self.shuffle()
 
     def shuffle(self):
         random.shuffle(self.draw_pile)
+        self.log("--- Deck Reshuffled ---")
 
     def draw(self):
         if not self.draw_pile:
@@ -70,9 +73,9 @@ class Deck:
             if not self.discard_pile:
                 return None # Truly out of cards
             self.draw_pile = self.discard_pile[:]
+            print(f"{len(self.draw_pile)} cards returned into draw pile")
             self.discard_pile = []
             self.shuffle()
-            self.log("--- Deck Reshuffled ---")
         
         return self.draw_pile.pop()
 
@@ -370,13 +373,13 @@ class Game:
                         action = "hit"
                         player.forced_flips -= 1
                         forced_draw = True
-                        self._log(f"{player.name} is forced to hit! ({player.forced_flips} remaining)")
+                        self._log(f"{player.name} {player.hand} is forced to hit! ({player.forced_flips} remaining)")
                     else:
                         opponents = [p for p in active_players if p != player]
                         action = player.decide_action(opponents)
 
                     if action == "hit":
-                        self._log(f"{player.name} HITS.")
+                        self._log(f"{player.name} {player.hand} HITS.")
                         result = self.deal_card_to_player(player, during_forced=forced_draw)
 
                         if forced_draw and player.forced_flips == 0 and not player.busted and result != "FLIP7":
@@ -390,7 +393,7 @@ class Game:
                             round_over = True
                             break
                     else:
-                        self._log(f"{player.name} STAYS.")
+                        self._log(f"{player.name} {player.hand} STAYS.")
                         player.active = False # Safe for round
 
         # 3. End of Round Scoring
