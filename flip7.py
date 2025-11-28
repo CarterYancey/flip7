@@ -7,6 +7,7 @@ from strategies import (
     AggressiveStrategy,
     ConservativeStrategy,
     Flip7ChaserStrategy,
+    PerfectStrategy,
     Strategy,
 )
 
@@ -86,6 +87,7 @@ class Player:
         self.second_chance = False
         self.forced_flips = 0 # For 'Flip Three' action
         self.strategy = strategy or Flip7ChaserStrategy()
+        self.game = None
 
     def reset_round(self):
         self.hand = []
@@ -139,7 +141,9 @@ class Game:
             strategy = None
             if strategies and idx < len(strategies):
                 strategy = strategies[idx]
-            self.players.append(Player(name, strategy=strategy))
+            player = Player(name, strategy=strategy)
+            player.game = self
+            self.players.append(player)
         self.deck = Deck(log=self._log if verbose else None)
         self.dealer_index = 0
         self.round_num = 1
@@ -397,6 +401,8 @@ def _parse_strategy(spec: str) -> Strategy:
     if base in {"flip7", "flip7chaser", "chaser"}:
         safe = int(param) if param else 50
         return Flip7ChaserStrategy(safe_score=safe)
+    if base in {"perfect", "perf"}:
+        return PerfectStrategy()
 
     raise ValueError(f"Unknown strategy spec: {spec}")
 
@@ -434,7 +440,7 @@ def main():
     parser.add_argument(
         "--players",
         nargs="+",
-        help="Player specs as Name:strategy (strategies: aggressive, conservative[=stay], flip7[=safe])",
+        help="Player specs as Name:strategy (strategies: aggressive, conservative[=stay], flip7[=safe], perfect)",
     )
     parser.add_argument(
         "--winning-score",
