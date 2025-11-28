@@ -70,10 +70,8 @@ class Deck:
     def draw(self):
         if not self.draw_pile:
             # Reshuffle discard into draw if empty [cite: 185]
-            if not self.discard_pile:
-                return None # Truly out of cards
             self.draw_pile = self.discard_pile[:]
-            print(f"{len(self.draw_pile)} cards returned into draw pile")
+            self.log(f"{len(self.draw_pile)} cards returned into draw pile")
             self.discard_pile = []
             self.shuffle()
         
@@ -197,6 +195,7 @@ class Game:
             # [cite: 95] Target must accept next 3 cards
             self._log(f"  > {target.name} must Flip Three cards immediately!")
             result = self.perform_flip_three(target)
+            self.deck.discard_pile.append(card)
             if result == "FLIP7":
                 return "FLIP7"
 
@@ -205,8 +204,7 @@ class Game:
             # Max 1 per player [cite: 105]
             if not drawer.second_chance:
                 drawer.second_chance = True
-                if add_to_drawer_hand:
-                    drawer.hand.append(card)
+                drawer.hand.append(card)
                 self._log(f"  > {drawer.name} gains a Second Chance!")
             else:
                 recipient = next((p for p in players if p != drawer and not p.second_chance), None)
@@ -229,10 +227,6 @@ class Game:
     def perform_flip_three(self, target: Player):
         flips_remaining = 3
         while flips_remaining > 0:
-            if target.busted:
-                target.pending_actions = []
-                return "BUST"
-
             self._log(f"    {target.name} flips a card for Flip Three... ({flips_remaining} to go)")
             result = self.deal_card_to_player(target, during_forced=True)
             flips_remaining -= 1
@@ -240,6 +234,7 @@ class Game:
             if result == "FLIP7":
                 return "FLIP7"
             if target.busted:
+                self.deck.discard_pile.extend(target.pending_actions)
                 target.pending_actions = []
                 return "BUST"
 
@@ -253,21 +248,18 @@ class Game:
 
     def deal_card_to_player(self, player, *, during_forced: bool = False):
         card = self.deck.draw()
-        if not card:
-            return # Deck empty edge case
-
         self._log(f"    {player.name} drew: {card}")
 
         if card.card_type == CardType.ACTION:
             # Action cards are resolved immediately (unless dealt during setup, handled separately)
             # In regular play, they are placed above rows[cite: 88], but effect triggers
             if during_forced and card.name in {"Flip Three", "Freeze"}:
-                player.hand.append(card)
+                #player.hand.append(card)
                 player.pending_actions.append(card)
                 self._log(f"    ! {card.name} will resolve after the Flip Three sequence.")
                 return "OK"
             else:
-                result = self.resolve_action_card(card, player, self.players, add_to_drawer_hand=True)
+                result = self.resolve_action_card(card, player, self.players, add_to_drawer_hand=False)
                 if result == "FLIP7":
                     self.pending_flip7_winner = self.pending_flip7_winner or player
                     return "FLIP7"
@@ -292,13 +284,16 @@ class Game:
                         if existing.name == "Second Chance":
                             player.hand.remove(existing)
                             self.deck.discard_pile.append(existing)
+                            self.deck.discard_pile.append(card)
                             break
                     # Card is effectively discarded, not added to hand
                 else:
                     self._log(f"    ! BUST ! {player.name} drew a duplicate {card.value}.")
                     player.busted = True
                     player.active = False
+                    self.deck.discard_pile.extend(player.pending_actions)
                     player.pending_actions = []
+                    self.deck.discard_pile.append(card)
             else:
                 player.hand.append(card)
                 # Check Flip 7 Victory [cite: 9]
@@ -313,6 +308,7 @@ class Game:
             return
 
         if player.busted:
+            self.deck.discard_pile.extend(target.pending_actions)
             player.pending_actions = []
             return
 
@@ -323,6 +319,7 @@ class Game:
             self._log(f"    > Resolving pending {card.name} from Flip Three.")
             result = self.resolve_action_card(card, player, self.players, add_to_drawer_hand=False)
             if result == "FLIP7":
+                self.deck.discard_pile.extend(pending)
                 return "FLIP7"
 
         return "OK"
@@ -376,6 +373,8 @@ class Game:
                             self._log(f"!!! {player.name} ACHIEVED FLIP 7 !!!")
                             winner_flip7 = self.pending_flip7_winner or player
                             round_over = True
+                            for p in self.players:
+                                self.deck.discard_pile.extend(p.pending_actions)
                             break
                     else:
                         self._log(f"{player.name} {player.hand} STAYS.")
@@ -408,6 +407,15 @@ class Game:
             current_round_cards.extend(p.hand)
 
         self.deck.discard_pile.extend(current_round_cards)
+        #TODO Sometimes, we get duplicated Flip Three cards in discard pile becasue of bad logic; this is a hacky way to fix that
+        if len(self.deck.discard_pile)+len(self.deck.draw_pile) != 94:
+            f3count = 0
+            for i, dc in enumerate(self.deck.discard_pile):
+                if dc.name == "Flip Three":
+                    f3count += 1
+                    if f3count > 3:
+                        self.deck.discard_pile.remove(dc)
+
 
         # Rotate Dealer [cite: 184]
         self.dealer_index = (self.dealer_index + 1) % len(self.players)
